@@ -1,8 +1,8 @@
 import sys
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel, QScrollArea,
                              QGridLayout, QFileDialog, QTextEdit, QComboBox,
-                             QSpinBox, QGroupBox)
+                             QSpinBox, QGroupBox, QTableWidget, QTableWidgetItem)
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QPixmap, QImage
 from PIL import Image
@@ -200,18 +200,26 @@ class MEMSController(QMainWindow):
         self.calculate_btn.clicked.connect(self.calculate_parameters)
         self.calculate_btn.setStyleSheet("background-color: lightblue; font-weight: bold;")
         right_layout.addWidget(self.calculate_btn)
-        
-        # Output text
-        output_label = QLabel('Zemax Parameters (P-Flag = 2):')
-        right_layout.addWidget(output_label)
-        
-        self.output_text = QTextEdit()
-        self.output_text.setReadOnly(True)
-        self.output_text.setFont(self.font())
-        right_layout.addWidget(self.output_text)
-        
+
+        # Info text
+        info_label = QLabel('Zemax Parameters (P-Flag = 2):')
+        right_layout.addWidget(info_label)
+
+        self.info_text = QTextEdit()
+        self.info_text.setReadOnly(True)
+        self.info_text.setMaximumHeight(100)
+        right_layout.addWidget(self.info_text)
+
+        # Table widget
+        table_label = QLabel('Parameter Table:')
+        right_layout.addWidget(table_label)
+
+        self.table_widget = QTableWidget()
+        self.table_widget.setStyleSheet("QTableWidget { gridline-color: black; }")
+        right_layout.addWidget(self.table_widget)
+
         # Copy button
-        self.copy_btn = QPushButton('Copy to Clipboard')
+        self.copy_btn = QPushButton('Copy Table to Clipboard')
         self.copy_btn.clicked.connect(self.copy_to_clipboard)
         right_layout.addWidget(self.copy_btn)
         
@@ -321,34 +329,50 @@ class MEMSController(QMainWindow):
             param_num = 10 + i // 15
             parameters.append((param_num, start_pixel, end_pixel, value))
 
-        # Format output based on table orientation
-        output = f"MEMS Configuration: {self.x_pixels} x {self.y_pixels} pixels\n"
-        output += f"Total pixels: {self.total_pixels}\n"
-        output += f"P-Flag: 2 (Individual pixel addressing)\n\n"
-        output += f"Angle 0 (Inactive): {self.angle0_spin.value()}°\n"
-        output += f"Angle 1 (On): {self.angle1_spin.value()}°\n"
-        output += f"Angle 2 (Off): {self.angle2_spin.value()}°\n\n"
+        # Store parameters for clipboard
+        self.parameters = parameters
 
+        # Update info text
+        info = f"MEMS Configuration: {self.x_pixels} x {self.y_pixels} pixels\n"
+        info += f"Total pixels: {self.total_pixels}\n"
+        info += f"P-Flag: 2 (Individual pixel addressing)\n"
+        info += f"Angle 0 (Inactive): {self.angle0_spin.value()}°\n"
+        info += f"Angle 1 (On): {self.angle1_spin.value()}°\n"
+        info += f"Angle 2 (Off): {self.angle2_spin.value()}°"
+        self.info_text.setText(info)
+
+        # Populate table based on orientation
         table_format = self.table_orient_combo.currentIndex()
 
         if table_format == 0:  # Parameters as Rows
-            output += "Parameter\tPixels\tValue\n"
-            for param_num, start, end, value in parameters:
-                output += f"{param_num}\t{start}-{end}\t{value}\n"
+            self.table_widget.setRowCount(len(parameters))
+            self.table_widget.setColumnCount(3)
+            self.table_widget.setHorizontalHeaderLabels(['Parameter', 'Pixels', 'Value'])
+
+            for row, (param_num, start, end, value) in enumerate(parameters):
+                self.table_widget.setItem(row, 0, QTableWidgetItem(str(param_num)))
+                self.table_widget.setItem(row, 1, QTableWidgetItem(f"{start}-{end}"))
+                self.table_widget.setItem(row, 2, QTableWidgetItem(str(value)))
+
         else:  # Parameters as Columns
-            # Create header row with parameter numbers
-            param_headers = "\t".join([str(p[0]) for p in parameters])
-            output += f"Parameter\t{param_headers}\n"
+            self.table_widget.setRowCount(3)
+            self.table_widget.setColumnCount(len(parameters))
 
-            # Create pixel ranges row
-            pixel_ranges = "\t".join([f"{p[1]}-{p[2]}" for p in parameters])
-            output += f"Pixels\t{pixel_ranges}\n"
+            # Set column headers to parameter numbers
+            headers = [str(p[0]) for p in parameters]
+            self.table_widget.setHorizontalHeaderLabels(headers)
 
-            # Create values row
-            values = "\t".join([str(p[3]) for p in parameters])
-            output += f"Value\t{values}\n"
+            # Set row headers
+            self.table_widget.setVerticalHeaderLabels(['Parameter', 'Pixels', 'Value'])
 
-        self.output_text.setText(output)
+            # Fill the table
+            for col, (param_num, start, end, value) in enumerate(parameters):
+                self.table_widget.setItem(0, col, QTableWidgetItem(str(param_num)))
+                self.table_widget.setItem(1, col, QTableWidgetItem(f"{start}-{end}"))
+                self.table_widget.setItem(2, col, QTableWidgetItem(str(value)))
+
+        # Resize columns to content
+        self.table_widget.resizeColumnsToContents()
 
         # Update status bar
         active_pixels = sum(1 for state in states if state != 0)
@@ -357,10 +381,33 @@ class MEMSController(QMainWindow):
         )
     
     def copy_to_clipboard(self):
-        """Copy output text to clipboard"""
+        """Copy table data to clipboard in Excel-friendly format"""
         clipboard = QApplication.clipboard()
-        clipboard.setText(self.output_text.toPlainText())
-        self.statusBar().showMessage('Copied to clipboard', 2000)
+
+        # Generate tab-separated data based on table orientation
+        table_format = self.table_orient_combo.currentIndex()
+
+        if table_format == 0:  # Parameters as Rows
+            # Header row
+            tsv_data = "Parameter\tPixels\tValue\n"
+            # Data rows
+            for param_num, start, end, value in self.parameters:
+                tsv_data += f"{param_num}\t{start}-{end}\t{value}\n"
+        else:  # Parameters as Columns
+            # Row 1: Parameter numbers
+            param_headers = "\t".join([str(p[0]) for p in self.parameters])
+            tsv_data = f"Parameter\t{param_headers}\n"
+
+            # Row 2: Pixel ranges
+            pixel_ranges = "\t".join([f"{p[1]}-{p[2]}" for p in self.parameters])
+            tsv_data += f"Pixels\t{pixel_ranges}\n"
+
+            # Row 3: Values
+            values = "\t".join([str(p[3]) for p in self.parameters])
+            tsv_data += f"Value\t{values}\n"
+
+        clipboard.setText(tsv_data)
+        self.statusBar().showMessage('Table copied to clipboard - paste into Excel', 2000)
 
 
 def main():
