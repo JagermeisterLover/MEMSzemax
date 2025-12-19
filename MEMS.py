@@ -161,28 +161,39 @@ class MEMSController(QMainWindow):
         self.angle0_spin.setSuffix("°")
         angle0_layout.addWidget(self.angle0_spin)
         angle_layout.addLayout(angle0_layout)
-        
+
         angle1_layout = QHBoxLayout()
         angle1_layout.addWidget(QLabel("Angle 1 (On):"))
         self.angle1_spin = QSpinBox()
         self.angle1_spin.setRange(-90, 90)
-        self.angle1_spin.setValue(5)
+        self.angle1_spin.setValue(12)
         self.angle1_spin.setSuffix("°")
         angle1_layout.addWidget(self.angle1_spin)
         angle_layout.addLayout(angle1_layout)
-        
+
         angle2_layout = QHBoxLayout()
         angle2_layout.addWidget(QLabel("Angle 2 (Off):"))
         self.angle2_spin = QSpinBox()
         self.angle2_spin.setRange(-90, 90)
-        self.angle2_spin.setValue(-5)
+        self.angle2_spin.setValue(-12)
         self.angle2_spin.setSuffix("°")
         angle2_layout.addWidget(self.angle2_spin)
         angle_layout.addLayout(angle2_layout)
         
         angle_group.setLayout(angle_layout)
         right_layout.addWidget(angle_group)
-        
+
+        # Table orientation selector
+        table_orient_layout = QHBoxLayout()
+        table_orient_label = QLabel('Table Format:')
+        table_orient_layout.addWidget(table_orient_label)
+
+        self.table_orient_combo = QComboBox()
+        self.table_orient_combo.addItems(['Parameters as Rows', 'Parameters as Columns'])
+        self.table_orient_combo.currentIndexChanged.connect(lambda: self.calculate_parameters())
+        table_orient_layout.addWidget(self.table_orient_combo)
+        right_layout.addLayout(table_orient_layout)
+
         # Calculate button
         self.calculate_btn = QPushButton('Calculate Parameters')
         self.calculate_btn.clicked.connect(self.calculate_parameters)
@@ -290,40 +301,54 @@ class MEMSController(QMainWindow):
         """Calculate Zemax parameter values"""
         # Get states for all pixels
         states = [btn.state for btn in self.pixel_buttons]
-        
+
         # Calculate parameters for groups of 15 pixels
         parameters = []
-        
+
         for i in range(0, self.total_pixels, 15):
             # Get up to 15 pixels
             group_states = states[i:i+15]
-            
+
             # Calculate base-3 to base-10 conversion
             value = 0
             for j, state in enumerate(group_states):
                 value += state * (3 ** j)
-            
+
             # Store parameter with pixel range
             start_pixel = i + 1
             end_pixel = min(i + 15, self.total_pixels)
-            parameters.append((start_pixel, end_pixel, value))
-        
-        # Format output
+            param_num = 10 + (start - 1) // 15
+            parameters.append((param_num, start_pixel, end_pixel, value))
+
+        # Format output based on table orientation
         output = f"MEMS Configuration: {self.x_pixels} x {self.y_pixels} pixels\n"
         output += f"Total pixels: {self.total_pixels}\n"
         output += f"P-Flag: 2 (Individual pixel addressing)\n\n"
         output += f"Angle 0 (Inactive): {self.angle0_spin.value()}°\n"
         output += f"Angle 1 (On): {self.angle1_spin.value()}°\n"
         output += f"Angle 2 (Off): {self.angle2_spin.value()}°\n\n"
-        output += "Parameters:\n"
-        output += "-" * 60 + "\n"
-        
-        for start, end, value in parameters:
-            param_num = 10 + (start - 1) // 15
-            output += f"Parameter {param_num:3d} (Pixels {start:4d}-{end:4d}): {value}\n"
-        
+
+        table_format = self.table_orient_combo.currentIndex()
+
+        if table_format == 0:  # Parameters as Rows
+            output += "Parameter\tPixels\tValue\n"
+            for param_num, start, end, value in parameters:
+                output += f"{param_num}\t{start}-{end}\t{value}\n"
+        else:  # Parameters as Columns
+            # Create header row with parameter numbers
+            param_headers = "\t".join([str(p[0]) for p in parameters])
+            output += f"Parameter\t{param_headers}\n"
+
+            # Create pixel ranges row
+            pixel_ranges = "\t".join([f"{p[1]}-{p[2]}" for p in parameters])
+            output += f"Pixels\t{pixel_ranges}\n"
+
+            # Create values row
+            values = "\t".join([str(p[3]) for p in parameters])
+            output += f"Value\t{values}\n"
+
         self.output_text.setText(output)
-        
+
         # Update status bar
         active_pixels = sum(1 for state in states if state != 0)
         self.statusBar().showMessage(
