@@ -11,13 +11,15 @@ import numpy as np
 
 class PixelButton(QPushButton):
     """Individual pixel button that can be in state 0, 1, or 2"""
-    def __init__(self, x, y):
+    def __init__(self, x, y, controller=None):
         super().__init__()
         self.x = x
         self.y = y
         self.state = 0  # 0, 1, or 2
+        self.controller = controller
         self.setFixedSize(QSize(15, 15))
         self.setCheckable(False)
+        self.setMouseTracking(True)  # Enable mouse tracking for hover events
         self.update_appearance()
         
     def update_appearance(self):
@@ -36,6 +38,19 @@ class PixelButton(QPushButton):
         self.state = (self.state + 1) % 3
         self.update_appearance()
 
+    def enterEvent(self, event):
+        """Handle mouse entering the button - paint if drawing mode is active"""
+        if self.controller and self.controller.is_drawing:
+            self.set_state(self.controller.selected_pen)
+        super().enterEvent(event)
+
+    def mousePressEvent(self, event):
+        """Handle mouse press - start drawing and paint this pixel"""
+        if event.button() == Qt.MouseButton.LeftButton and self.controller:
+            self.controller.is_drawing = True
+            self.set_state(self.controller.selected_pen)
+        super().mousePressEvent(event)
+
 
 class MEMSController(QMainWindow):
     def __init__(self):
@@ -44,7 +59,9 @@ class MEMSController(QMainWindow):
         self.y_pixels = 48
         self.total_pixels = self.x_pixels * self.y_pixels
         self.pixel_buttons = []
-        
+        self.selected_pen = 1  # Default pen state is 1 (On)
+        self.is_drawing = False  # Track if mouse button is held down
+
         self.init_ui()
         
     def init_ui(self):
@@ -64,7 +81,19 @@ class MEMSController(QMainWindow):
         
         # Control buttons
         control_layout = QHBoxLayout()
-        
+
+        # Pen tool selector
+        pen_label = QLabel('Pen:')
+        control_layout.addWidget(pen_label)
+
+        self.pen_selector = QComboBox()
+        self.pen_selector.addItems(['0 - Inactive (grey)', '1 - On (green)', '2 - Off (red)'])
+        self.pen_selector.setCurrentIndex(1)  # Default to state 1 (On)
+        self.pen_selector.currentIndexChanged.connect(self.pen_changed)
+        control_layout.addWidget(self.pen_selector)
+
+        control_layout.addSpacing(20)  # Add some space
+
         self.load_image_btn = QPushButton('Load Image')
         self.load_image_btn.clicked.connect(self.load_image)
         control_layout.addWidget(self.load_image_btn)
@@ -77,7 +106,7 @@ class MEMSController(QMainWindow):
         control_layout.addWidget(self.fill_state_label)
         
         self.fill_state_combo = QComboBox()
-        self.fill_state_combo.addItems(['0 (Off)', '1 (+angle)', '2 (-angle)'])
+        self.fill_state_combo.addItems(['0 - Inactive (grey)', '1 - On (green)', '2 - Off (red)'])
         control_layout.addWidget(self.fill_state_combo)
         
         self.fill_all_btn = QPushButton('Fill All')
@@ -100,7 +129,7 @@ class MEMSController(QMainWindow):
         # So we create from bottom to top
         for y in range(self.y_pixels):
             for x in range(self.x_pixels):
-                pixel_btn = PixelButton(x, y)
+                pixel_btn = PixelButton(x, y, controller=self)
                 pixel_btn.clicked.connect(lambda checked, btn=pixel_btn: self.pixel_clicked(btn))
                 # Display from top to bottom (reverse Y for display)
                 self.grid_layout.addWidget(pixel_btn, self.y_pixels - 1 - y, x)
@@ -121,7 +150,7 @@ class MEMSController(QMainWindow):
         angle_layout = QVBoxLayout()
         
         angle0_layout = QHBoxLayout()
-        angle0_layout.addWidget(QLabel("Angle 0 (State 0):"))
+        angle0_layout.addWidget(QLabel("Angle 0 (Inactive):"))
         self.angle0_spin = QSpinBox()
         self.angle0_spin.setRange(-90, 90)
         self.angle0_spin.setValue(0)
@@ -130,7 +159,7 @@ class MEMSController(QMainWindow):
         angle_layout.addLayout(angle0_layout)
         
         angle1_layout = QHBoxLayout()
-        angle1_layout.addWidget(QLabel("Angle 1 (State 1):"))
+        angle1_layout.addWidget(QLabel("Angle 1 (On):"))
         self.angle1_spin = QSpinBox()
         self.angle1_spin.setRange(-90, 90)
         self.angle1_spin.setValue(5)
@@ -139,7 +168,7 @@ class MEMSController(QMainWindow):
         angle_layout.addLayout(angle1_layout)
         
         angle2_layout = QHBoxLayout()
-        angle2_layout.addWidget(QLabel("Angle 2 (State 2):"))
+        angle2_layout.addWidget(QLabel("Angle 2 (Off):"))
         self.angle2_spin = QSpinBox()
         self.angle2_spin.setRange(-90, 90)
         self.angle2_spin.setValue(-5)
@@ -175,9 +204,19 @@ class MEMSController(QMainWindow):
         # Initial calculation
         self.calculate_parameters()
     
+    def mouseReleaseEvent(self, event):
+        """Stop drawing when mouse button is released"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.is_drawing = False
+        super().mouseReleaseEvent(event)
+
+    def pen_changed(self, index):
+        """Update selected pen state when user changes pen selector"""
+        self.selected_pen = index
+
     def pixel_clicked(self, pixel_btn):
-        """Cycle through states when pixel is clicked"""
-        pixel_btn.cycle_state()
+        """Set pixel to selected pen state when clicked"""
+        pixel_btn.set_state(self.selected_pen)
         
     def clear_all(self):
         """Set all pixels to state 0"""
@@ -220,12 +259,12 @@ class MEMSController(QMainWindow):
                     for x in range(self.x_pixels):
                         # Calculate pixel index in MEMS numbering
                         pixel_index = y * self.x_pixels + x
-                        
-                        # Get pixel value from image (flip Y for display)
-                        img_value = img_bw[y, x]
-                        
-                        # Set state: 0 for black (off), 1 for white (on)
-                        state = 1 if img_value == 1 else 0
+
+                        # Get pixel value from image (flip Y to correct orientation)
+                        img_value = img_bw[self.y_pixels - 1 - y, x]
+
+                        # Set state: black (0) -> On (1), white (1) -> Off (2)
+                        state = 2 if img_value == 1 else 1
                         self.pixel_buttons[pixel_index].set_state(state)
                 
                 self.statusBar().showMessage(f'Image loaded: {file_name}', 3000)
@@ -259,9 +298,9 @@ class MEMSController(QMainWindow):
         output = f"MEMS Configuration: {self.x_pixels} x {self.y_pixels} pixels\n"
         output += f"Total pixels: {self.total_pixels}\n"
         output += f"P-Flag: 2 (Individual pixel addressing)\n\n"
-        output += f"Angle 0: {self.angle0_spin.value()}°\n"
-        output += f"Angle 1: {self.angle1_spin.value()}°\n"
-        output += f"Angle 2: {self.angle2_spin.value()}°\n\n"
+        output += f"Angle 0 (Inactive): {self.angle0_spin.value()}°\n"
+        output += f"Angle 1 (On): {self.angle1_spin.value()}°\n"
+        output += f"Angle 2 (Off): {self.angle2_spin.value()}°\n\n"
         output += "Parameters:\n"
         output += "-" * 60 + "\n"
         
