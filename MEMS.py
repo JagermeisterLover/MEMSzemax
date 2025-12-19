@@ -38,18 +38,18 @@ class PixelButton(QPushButton):
         self.state = (self.state + 1) % 3
         self.update_appearance()
 
-    def enterEvent(self, event):
-        """Handle mouse entering the button - paint if drawing mode is active"""
-        if self.controller and self.controller.is_drawing:
-            self.set_state(self.controller.selected_pen)
-        super().enterEvent(event)
-
     def mousePressEvent(self, event):
         """Handle mouse press - start drawing and paint this pixel"""
         if event.button() == Qt.MouseButton.LeftButton and self.controller:
             self.controller.is_drawing = True
             self.set_state(self.controller.selected_pen)
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        """Handle mouse move - paint if drawing mode is active"""
+        if self.controller and self.controller.is_drawing:
+            self.set_state(self.controller.selected_pen)
+        super().mouseMoveEvent(event)
 
 
 class MEMSController(QMainWindow):
@@ -118,12 +118,13 @@ class MEMSController(QMainWindow):
         # Pixel grid
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
-        
-        grid_widget = QWidget()
+
+        self.grid_widget = QWidget()
+        self.grid_widget.setMouseTracking(True)  # Enable mouse tracking on grid
         self.grid_layout = QGridLayout()
         self.grid_layout.setSpacing(0)
-        grid_widget.setLayout(self.grid_layout)
-        
+        self.grid_widget.setLayout(self.grid_layout)
+
         # Create pixel buttons
         # Zemax numbering: bottom-left is pixel 1, increment in +X, then +Y
         # So we create from bottom to top
@@ -135,7 +136,10 @@ class MEMSController(QMainWindow):
                 self.grid_layout.addWidget(pixel_btn, self.y_pixels - 1 - y, x)
                 self.pixel_buttons.append(pixel_btn)
         
-        scroll_area.setWidget(grid_widget)
+        # Install event filter on grid widget to handle drag painting
+        self.grid_widget.installEventFilter(self)
+
+        scroll_area.setWidget(self.grid_widget)
         left_layout.addWidget(scroll_area)
         
         main_layout.addWidget(left_panel, stretch=2)
@@ -209,6 +213,16 @@ class MEMSController(QMainWindow):
         if event.button() == Qt.MouseButton.LeftButton:
             self.is_drawing = False
         super().mouseReleaseEvent(event)
+
+    def eventFilter(self, obj, event):
+        """Filter events on grid widget to enable drag painting"""
+        if obj == self.grid_widget and self.is_drawing:
+            if event.type() == event.Type.MouseMove:
+                # Find which button is under the mouse
+                widget = self.grid_widget.childAt(event.pos())
+                if isinstance(widget, PixelButton):
+                    widget.set_state(self.selected_pen)
+        return super().eventFilter(obj, event)
 
     def pen_changed(self, index):
         """Update selected pen state when user changes pen selector"""
