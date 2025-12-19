@@ -190,6 +190,7 @@ class MEMSController(QMainWindow):
 
         self.table_orient_combo = QComboBox()
         self.table_orient_combo.addItems(['Parameters as Rows', 'Parameters as Columns'])
+        self.table_orient_combo.setCurrentIndex(1)  # Default to Parameters as Columns
         self.table_orient_combo.currentIndexChanged.connect(lambda: self.calculate_parameters())
         table_orient_layout.addWidget(self.table_orient_combo)
         right_layout.addLayout(table_orient_layout)
@@ -317,7 +318,7 @@ class MEMSController(QMainWindow):
             # Store parameter with pixel range
             start_pixel = i + 1
             end_pixel = min(i + 15, self.total_pixels)
-            param_num = 10 + (start - 1) // 15
+            param_num = 10 + i // 15
             parameters.append((param_num, start_pixel, end_pixel, value))
 
         # Format output based on table orientation
