@@ -6,3 +6,8 @@ Guide:
 1. Draw something/load image
 2. Press calculate.
 3. Press copy table to clipboard, that will copy all calculated data for pixels. You can paste that in excel and copy pixel values into zemax opticstudio.
+
+Running:
+Install python 3.12
+pip install -r -requirements
+python MEMS.py
